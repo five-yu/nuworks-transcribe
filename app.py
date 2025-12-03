@@ -1,94 +1,69 @@
-# app.py
-
-# --- 1. ライブラリのインポート ---
-# streamlit: Webアプリの画面を作るためのライブラリ
+# app.py (修正版)
 import streamlit as st
-# tempfile: アップロードされた一時ファイルを扱うための標準ライブラリ
 import tempfile
-# os: ファイルパスの操作やファイルの削除を行うための標準ライブラリ
 import os
-# faster_whisper: 高速な文字起こしを行うAIライブラリ
 from faster_whisper import WhisperModel
 
-# --- 2. 画面の基本設定 ---
-# ページの設定（タイトルやアイコン）
-st.set_page_config(page_title="NUWORKS 文字起こしツール", page_icon="📝")
-st.title("📝 NUWORKS 営業通話 文字起こしアプリ")
-st.write("mp3ファイルをアップロードすると、AIが自動で文字起こしを行います。")
+st.set_page_config(page_title="NUWORKS 文字起こしツール v2", page_icon="📝")
+st.title("📝 NUWORKS 営業通話 文字起こしアプリ (Medium版)")
 
-# --- 3. サイドバーの設定（AIモデルの選択など） ---
-# サイドバーに設定項目を置くことで、メイン画面をすっきりさせます
+# --- 設定サイドバー ---
+st.sidebar.header("設定")
+# モデルサイズ：mediumをデフォルトに
 model_size = st.sidebar.selectbox(
-    "AIモデルのサイズを選択",
+    "AIモデルサイズ",
     ["base", "small", "medium", "large-v3"],
-    index=1, # デフォルトは 'small'
-    help="サイズが大きいほど精度は上がりますが、処理時間が長くなります。"
+    index=2, # mediumを選択
+    help="Mediumが精度と速度のバランスが良いです。"
 )
 
-# --- 4. ファイルアップロード機能 ---
+# 高速化オプション
+beam_size = st.sidebar.slider(
+    "解析精度 (Beam Size)",
+    min_value=1, max_value=5, value=1, # デフォルトを1にして高速化
+    help="数値を下げると速くなりますが、少し精度が落ちる可能性があります。"
+)
+
 uploaded_file = st.file_uploader("音声ファイルをアップロード (mp3, wav, m4a)", type=["mp3", "wav", "m4a"])
 
-# --- 5. 文字起こし処理の実行 ---
-# ファイルがアップロードされ、かつボタンが押されたら処理開始
 if uploaded_file is not None:
     if st.button("文字起こしを開始する"):
-        
-        # 処理中のスピナー（ぐるぐる）を表示
-        with st.spinner("AIが音声を解析中です...しばらくお待ちください..."):
-            
+        with st.spinner("AIが解析中です... mediumモデルのため数分かかります..."):
             try:
-                # --- A. 一時ファイルの作成 ---
-                # faster-whisperは「ファイルパス」を必要とするため、
-                # メモリ上のデータを一度PCの一時フォルダに保存します。
+                # 一時ファイル作成
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_file_path = tmp_file.name
 
-                # --- B. AIモデルの読み込み ---
-                # CPUで動く設定にしています（Web上の無料サーバーはGPUがないため）
-                # int8は計算を軽量化する設定です
+                # モデル読み込み (CPU設定)
                 model = WhisperModel(model_size, device="cpu", compute_type="int8")
 
-                # --- C. 文字起こしの実行 ---
-                # segments: 文字起こしされた文章の断片
-                # info: 言語などの情報
-                segments, info = model.transcribe(tmp_file_path, beam_size=5)
+                # 文字起こし実行 (beam_sizeを可変に)
+                segments, info = model.transcribe(tmp_file_path, beam_size=beam_size)
 
-                st.success(f"完了しました！ (検出言語: {info.language})")
+                st.success(f"完了 (言語: {info.language})")
 
-                # --- D. 結果の整形と表示 ---
-                # 文字起こし結果を結合して一つのテキストにする
                 full_text = ""
-                
-                # プログレスバー（進捗バー）の表示用
                 progress_text = st.empty()
                 
                 for segment in segments:
-                    # タイムスタンプ（開始時間）を見やすく整形
-                    start_time = f"{segment.start:.1f}秒"
                     text = segment.text
                     
-                    # 画面に逐次表示（チャットのようにポンポン出てくる）
-                    st.markdown(f"**[{start_time}]** {text}")
-                    
-                    # 保存用テキストに追加
-                    full_text += f"[{start_time}] {text}\n"
+                    # --- 修正点: タイムスタンプを表示しない ---
+                    st.markdown(f"- {text}") # 箇条書きで表示
+                    full_text += f"{text}\n"  # 時間を含まずテキストのみ追加
 
-                # --- E. 全文の表示とダウンロード ---
-                st.markdown("---") # 区切り線
-                st.subheader("全体の結果")
+                st.markdown("---")
+                st.subheader("結果テキスト")
                 st.text_area("コピー用", full_text, height=300)
 
-                # テキストファイルとしてダウンロードするボタン
                 st.download_button(
-                    label="テキストファイルとしてダウンロード",
+                    label="テキストをダウンロード",
                     data=full_text,
                     file_name="transcription.txt",
                     mime="text/plain"
                 )
 
-                # --- F. お掃除 ---
-                # 使い終わった一時ファイルを削除する
                 os.remove(tmp_file_path)
 
             except Exception as e:
